@@ -1,7 +1,28 @@
-import torch
+import torch, os
 from functools import partial
 from transformers import PreTrainedTokenizer
 from transformers.trainer_pt_utils import LabelSmoother
+
+_DEBUG_COLLATOR_LOGGED = False  # print only once per process
+
+def _log_input_gt_pairs(batch_text, batch_labels, batch_input_ids, tokenizer):
+    """Print input text and the ground-truth (learned) tokens for the first batch."""
+    global _DEBUG_COLLATOR_LOGGED
+    if _DEBUG_COLLATOR_LOGGED:
+        return
+    _DEBUG_COLLATOR_LOGGED = True
+
+    print("\n" + "=" * 80)
+    print("DEBUG: Training input – ground truth pairs (first batch)")
+    print("=" * 80)
+    for i, (text, labels, input_ids) in enumerate(zip(batch_text, batch_labels, batch_input_ids)):
+        # Collect only the tokens that the model must predict (non-ignore positions)
+        gt_token_ids = input_ids[labels != LabelSmoother.ignore_index]
+        gt_text = tokenizer.decode(gt_token_ids, skip_special_tokens=False)
+        print(f"\n--- Sample {i} ---")
+        print(f"[INPUT TEXT]\n{text}")
+        print(f"\n[GROUND TRUTH (tokens to predict)]\n{gt_text}")
+    print("=" * 80 + "\n")
 
 def data_collator(batch: list[list], *, tokenizer: PreTrainedTokenizer, **kwargs):
     batch = list(zip(*batch))
@@ -21,6 +42,8 @@ def data_collator(batch: list[list], *, tokenizer: PreTrainedTokenizer, **kwargs
             # NOTE: input_ids may out of boundary of len(tokenizer) - 1. (1 is the added vision placeholder)
             # this is because some frames has v_placeholder_id target. so replace it with eos token.
             labels[labels >= len(tokenizer) - 1] = tokenizer.eos_token_id
+    if os.environ.get("DEBUG_TRAINING_DATA", "1") != "0":
+        _log_input_gt_pairs(batch_text, batch_labels, batch.input_ids, tokenizer)
     batch['labels'] = batch_labels
     batch.pop('offset_mapping')
     batch['frames'] = torch.cat(batch_frames)
