@@ -18,7 +18,7 @@ def download_video(video_id, video_url, output_dir, ffmpeg_location=None):
         except:
             print(f'{output_path} may be broken. Downloading it again...')
             os.remove(output_path)
-    cmd = ["yt-dlp", "--username", "oauth2", "--password", "", "-f", "mp4", "-o", output_path, video_url]
+    cmd = ["yt-dlp", "-f", "b[ext=mp4]", "-o", output_path, video_url]
     if ffmpeg_location:
         cmd.extend(["--ffmpeg-location", ffmpeg_location])
     subprocess.run(cmd, check=True)
