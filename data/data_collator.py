@@ -5,9 +5,10 @@ from transformers.trainer_pt_utils import LabelSmoother
 
 def _log_input_gt_pairs(batch_text, batch_labels, batch_input_ids, tokenizer):
     for text, labels, input_ids in zip(batch_text, batch_labels, batch_input_ids):
+        input_ids_clone = input_ids.clone()
         valid_labels = labels.clone()
         valid_labels[valid_labels == LabelSmoother.ignore_index] = tokenizer.pad_token_id
-        decoded_input = tokenizer.decode(input_ids, skip_special_tokens=False)
+        decoded_input = tokenizer.decode(input_ids_clone, skip_special_tokens=False)
         decoded_labels = tokenizer.decode(valid_labels, skip_special_tokens=False)
         print('INPUT:', decoded_input)
         print('GT:   ', decoded_labels)
