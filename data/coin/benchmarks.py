@@ -6,6 +6,8 @@ from .coin import COIN
 from ..stream import StreamMixIn
 from ..utils import ceil_time_by_fps, DictWithTo
 
+
+
 class COINBenchmark(COIN, StreamMixIn):
     evaluation_kwargs = DictWithTo(evaluator='generate_after_embed', max_new_tokens=512, do_sample=False, use_cache=True, temperature=1.0, top_p=1.0)
 
@@ -262,3 +264,96 @@ def build_coin_taskprocedure_train(**kwargs):
 
 def build_coin_taskprocedure_test(**kwargs):
     return COINTaskProcedure(split='test', **kwargs)
+
+class COINStream(COIN, StreamMixIn):
+    """
+    Live streaming paradigm: one sample per video, full temporal context.
+    Conversation structure:
+      User: The video is about to <task>. Please remind me when the related action starts,
+            summarizes when it ends, as well as forecasts the next action.
+      [frames before step_0]
+      Assistant: Now doing the step to <step_0>. Then try to <step_1>.
+      [frames during step_0]
+      Assistant: Just finished the step to <step_0>. Then try to <step_1>.
+      [frames between step_0 and step_1]
+      Assistant: Now doing the step to <step_1>. Then try to <step_2>.
+      ...
+    """
+    @staticmethod
+    def get_user_message(task):
+        return {
+            "role": "user",
+            "content": f"The video is about to {task}. Please remind me when the related action starts, summarizes when it ends, as well as forecasts the next action."
+        }
+
+    def __init__(self, *, split: str, frame_fps: int, is_training: bool, **kwargs):
+        super().__init__(split=split, frame_fps=frame_fps, is_training=is_training, **kwargs)
+        self.is_training = is_training
+        self.frame_fps = frame_fps
+        self.annos = []
+
+        for anno in self._annos:
+            video_uid = anno['video_uid']
+            duration = self.metadata[video_uid]['duration']
+            steps = anno['steps']
+            if not steps:
+                continue
+
+            video_start = ceil_time_by_fps(anno['start'], frame_fps, min_time=0, max_time=duration)
+            video_end = ceil_time_by_fps(anno['end'], frame_fps, min_time=0, max_time=duration)
+            prev_time = video_start
+            conversation = [COINStream.get_user_message(anno['task'])]
+
+            for i, step in enumerate(steps):
+                next_step = steps[i + 1] if i + 1 < len(steps) else None
+                step_start = ceil_time_by_fps(step['start'], frame_fps, min_time=0, max_time=duration)
+                step_end = ceil_time_by_fps(step['end'], frame_fps, min_time=0, max_time=duration)
+
+                # frames leading up to this step
+                frames_before = int((step_start - prev_time) * frame_fps)
+                if frames_before > 0:
+                    conversation.append({'role': 'stream', 'num_frames': frames_before, 'learn': True})
+
+                # "Now doing" response at step start
+                now_msg = f"Now doing the step to {step['text']}."
+                if next_step:
+                    now_msg += f" Then try to {next_step['text']}."
+                conversation.append({'role': 'assistant', 'content': now_msg, 'learn': True})
+
+                # frames spanning the step
+                frames_during = int((step_end - step_start) * frame_fps)
+                if frames_during > 0:
+                    conversation.append({'role': 'stream', 'num_frames': frames_during, 'learn': True})
+
+                # "Just finished" response at step end
+                finish_msg = f"Just finished the step to {step['text']}."
+                if next_step:
+                    finish_msg += f" Then try to {next_step['text']}."
+                conversation.append({'role': 'assistant', 'content': finish_msg, 'learn': True})
+
+                prev_time = step_end
+
+            # trailing frames after last step
+            frames_after = int((video_end - prev_time) * frame_fps)
+            if frames_after > 0:
+                conversation.append({'role': 'stream', 'num_frames': frames_after, 'learn': True})
+
+            start_frame = int(video_start * frame_fps)
+            end_frame = int(video_end * frame_fps) + 1
+            if start_frame >= end_frame:
+                continue
+
+            self.annos.append({
+                'conversation': conversation,
+                'load_ranges': {self.metadata[video_uid]['path']: range(start_frame, end_frame)}
+            })
+
+    def __getitem__(self, index):
+        anno = self.annos[index]
+        return *super().__getitem__(conversation=anno['conversation'], load_ranges=anno['load_ranges']), index, None
+
+def build_coin_stream_train(**kwargs):
+    return COINStream(split='train', **kwargs)
+
+def build_coin_stream_test(**kwargs):
+    return COINStream(split='test', **kwargs)
