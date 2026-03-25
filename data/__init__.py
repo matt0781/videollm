@@ -46,4 +46,4 @@ def get_compute_metrics_dict(
     if not dataset_dict:
         return None
     # add eval_ since transformers default metrics prefix is eval
-    return {k: partial(v.compute_metrics, **kwargs) for k, v in dataset_dict.items()}
+    return {k: partial(v.compute_metrics, **kwargs) for k, v in dataset_dict.items() if hasattr(v, 'compute_metrics')}
