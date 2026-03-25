@@ -50,6 +50,8 @@ def data_collator(batch: list[list], *, tokenizer: PreTrainedTokenizer, **kwargs
     batch['sample_idxs'] = torch.tensor(batch_sample_idx)
     if batch_evaluation_kwargs[0]:
         batch['evaluation_kwargs'] = batch_evaluation_kwargs[0] # evaluation only supports bs = 1, so its okay
+    for k, v in batch.items():
+        print(f"  batch[{k!r}]: {v.shape if isinstance(v, torch.Tensor) else v}")
     return batch
 
 def get_data_collator(**kwargs):
